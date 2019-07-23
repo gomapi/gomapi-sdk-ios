@@ -43,6 +43,23 @@ TEST(TileCover, Pitch) {
               util::tileCover(transform.getState(), 2));
 }
 
+TEST(TileCover, PitchOverAllowedByContentInsets) {
+    Transform transform;
+    transform.resize({ 512, 512 });
+
+    transform.jumpTo(CameraOptions().withCenter(LatLng { 0.1, -0.1 }).withPadding(EdgeInsets { 376, 0, 0, 0 })
+                                    .withZoom(8.0).withBearing(5.0).withPitch(60.0));
+    // Top padding of 376 leads to capped pitch. See Transform::getMaxPitchForEdgeInsets.
+    EXPECT_LE(transform.getPitch() + 0.001, util::DEG2RAD * 60);
+
+    EXPECT_EQ((std::vector<UnwrappedTileID>{
+        { 0, { 2, 2, 1 } }, { 0, { 2, 1, 1 } }, { 0, { 2, 2, 2 } }, { 0, { 2, 1, 2 } }, { 0, { 2, 2, 0 } },
+        { 0, { 2, 1, 0 } }, { 0, { 2, 3, 1 } }, { 0, { 2, 0, 1 } }, { 0, { 2, 3, 0 } }, { 0, { 2, 0, 0 } },
+        { 1, { 2, 0, 1 } }, { 1, { 2, 0, 0 } }, {-1, { 2, 3, 0 } }, { 1, { 2, 1, 0 } }, { 1, { 2, 2, 0 } }
+    }),
+              util::tileCover(transform.getState(), 2));
+}
+
 TEST(TileCover, WorldZ1) {
     EXPECT_EQ((std::vector<UnwrappedTileID>{
         { 1, 0, 0 }, { 1, 0, 1 }, { 1, 1, 0 }, { 1, 1, 1 },

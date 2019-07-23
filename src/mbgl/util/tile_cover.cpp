@@ -57,22 +57,6 @@ static void scanSpans(edge e0, edge e1, int32_t ymin, int32_t ymax, ScanLine sca
     }
 }
 
-// scan-line conversion
-static void scanTriangle(const Point<double>& a, const Point<double>& b, const Point<double>& c, int32_t ymin, int32_t ymax, ScanLine& scanLine) {
-    edge ab = edge(a, b);
-    edge bc = edge(b, c);
-    edge ca = edge(c, a);
-
-    // sort edges by y-length
-    if (ab.dy > bc.dy) { std::swap(ab, bc); }
-    if (ab.dy > ca.dy) { std::swap(ab, ca); }
-    if (bc.dy > ca.dy) { std::swap(bc, ca); }
-
-    // scan span! scan span!
-    if (ab.dy) scanSpans(ca, ab, ymin, ymax, scanLine);
-    if (bc.dy) scanSpans(ca, bc, ymin, ymax, scanLine);
-}
-
 } // namespace
 
 namespace util {
@@ -85,7 +69,7 @@ std::vector<UnwrappedTileID> tileCover(const Point<double>& tl,
                                        const Point<double>& bl,
                                        const Point<double>& c,
                                        int32_t z) {
-    const int32_t tiles = 1 << z;
+    const int32_t tiles = (1 << z) + 1;
 
     struct ID {
         int32_t x, y;
@@ -96,30 +80,77 @@ std::vector<UnwrappedTileID> tileCover(const Point<double>& tl,
 
     auto scanLine = [&](int32_t x0, int32_t x1, int32_t y) {
         int32_t x;
-        if (y >= 0 && y <= tiles) {
-            for (x = x0; x < x1; ++x) {
-                const auto dx = x + 0.5 - c.x, dy = y + 0.5 - c.y;
-                t.emplace_back(ID{ x, y, dx * dx + dy * dy });
-            }
+        for (x = x0; x < x1; ++x) {
+            const auto dx = x + 0.5 - c.x, dy = y + 0.5 - c.y;
+            t.emplace_back(ID { x, y, dx * dx + dy * dy });
         }
     };
 
-    // Divide the screen up in two triangles and scan each of them:
-    // \---+
-    // | \ |
-    // +---\.
-    scanTriangle(tl, tr, br, 0, tiles, scanLine);
-    scanTriangle(br, bl, tl, 0, tiles, scanLine);
+    std::vector<Point<double>> bounds = {tl, tr, br, bl};
+    while (bounds[0].y > min(min(bounds[1].y, bounds[2].y), bounds[3].y)) {
+        std::rotate(bounds.begin(), bounds.begin() + 1, bounds.end());
+    }
+    // Keeping the clockwise winding order (abcd), we rotated convex quadrilateral
+    // angles in such way that angle a (bounds[0]) is on top):
+    //           a
+    //         /   \
+    //        /     b
+    //       /      |
+    //      /       c
+    //     /  ....     // there is edge between c and d :)
+    //    / ..
+    //   d
+    // This is an example: we also handle also cases where d.y < c.y, d.y < b.y etc.
+    // Split this to tree scans:
+    //           a
+    //         /   \
+    //        /     b
+    //  -----------------
+    //       /      |
+    //      /       c
+    //  -----------------
+    //     /  ....     // there is edge between c and d :)
+    //    / ..
+    //   d
+    // polygon abcd (bounds[0..3]) cannot be concave. Point a is one on the top
+    // (lowest y value) after previous rotation.
+    edge ab = edge(bounds[0], bounds[1]);
+    edge ad = edge(bounds[0], bounds[3]);
+
+    int32_t ymin = std::floor(bounds[0].y);
+    if (bounds[3].y < bounds[1].y) { std::swap(ab, ad); }
+    int32_t ymax = std::ceil(ab.y1);
+    if (ab.dy) {
+        scanSpans(ad, ab, std::max(0, ymin), std::min(tiles, ymax), scanLine);
+        ymin = ymax;
+    }
+
+    float yCutLower = min(bounds[2].y, ad.y1);
+    ymax = std::ceil(yCutLower);
+
+    // bc is edge opposite of ad
+    edge bc = bounds[3].y < bounds[1].y ? edge(bounds[3], bounds[2]) : edge(bounds[1], bounds[2]);
+    if (bc.dy) {
+        scanSpans(ad, bc, std::max(0, ymin), std::min(tiles, ymax), scanLine);
+        ymin = ymax;
+    } else {
+        ymin = std::floor(yCutLower);
+    }
+
+    // The triangle at the bottom
+    if (ad.y1 < bc.y1) { std::swap(ad, bc); }
+    ymax = std::ceil(ad.y1);
+    bc = edge({ bc.x1, bc.y1 }, { ad.x1, ad.y1 });
+    if (bc.dy) { scanSpans(ad, bc, std::max(0, ymin), std::min(tiles, ymax), scanLine); }
 
     // Sort first by distance, then by x/y.
     std::sort(t.begin(), t.end(), [](const ID& a, const ID& b) {
         return std::tie(a.sqDist, a.x, a.y) < std::tie(b.sqDist, b.x, b.y);
     });
 
-    // Erase duplicate tile IDs (they typically occur at the common side of both triangles).
-    t.erase(std::unique(t.begin(), t.end(), [](const ID& a, const ID& b) {
-                return a.x == b.x && a.y == b.y;
-            }), t.end());
+    assert(t.end() == std::unique(t.begin(), t.end(), [](const ID& a, const ID& b) {
+        return a.x == b.x && a.y == b.y;
+    })); // no duplicates.
 
     std::vector<UnwrappedTileID> result;
     for (const auto& id : t) {

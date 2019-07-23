@@ -41,13 +41,12 @@ void TransformState::getProjMatrix(mat4& projMatrix, uint16_t nearZ, bool aligne
     // [width/2 + offset.x, 0] in Z units, using the law of sines.
     // 1 Z unit is equivalent to 1 horizontal px at the center of the map
     // (the distance between[width/2, height/2] and [width/2 + 1, height/2])
-    const double fovAboveCenter = getFieldOfView() * (0.5 + offset.y / size.height);
-    const double groundAngle = M_PI / 2.0 + getPitch();
-    const double aboveCenterSurfaceDistance = std::sin(fovAboveCenter) * cameraToCenterDistance / std::sin(M_PI - groundAngle - fovAboveCenter);
-
-
+    // See TransformState::fov description: fov = 2 * arctan((height / 2) / (height * 1.5)).
+    const double tanFovAboveCenter = (size.height * 0.5 + offset.y) / (size.height * 1.5);
+    const double tanMultiple = tanFovAboveCenter * std::tan(getPitch());
+    assert(tanMultiple < 1);
     // Calculate z distance of the farthest fragment that should be rendered.
-    const double furthestDistance = std::cos(M_PI / 2 - getPitch()) * aboveCenterSurfaceDistance + cameraToCenterDistance;
+    const double furthestDistance = cameraToCenterDistance / (1 - tanMultiple);
     // Add a bit extra to avoid precision problems when a fragment's distance is exactly `furthestDistance`
     const double farZ = furthestDistance * 1.01;
 
@@ -64,7 +63,7 @@ void TransformState::getProjMatrix(mat4& projMatrix, uint16_t nearZ, bool aligne
     const bool flippedY = viewportMode == ViewportMode::FlippedY;
     matrix::scale(projMatrix, projMatrix, 1.0, flippedY ? 1 : -1, 1);
 
-    matrix::translate(projMatrix, projMatrix, 0, 0, -getCameraToCenterDistance());
+    matrix::translate(projMatrix, projMatrix, 0, 0, -cameraToCenterDistance);
 
     using NO = NorthOrientation;
     switch (getNorthOrientation()) {

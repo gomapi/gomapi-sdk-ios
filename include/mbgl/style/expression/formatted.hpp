@@ -36,7 +36,7 @@ struct FormattedSection {
 class Formatted {
 public:
     Formatted() = default;
-    
+
     Formatted(const char* plainU8String) {
         sections.emplace_back(std::string(plainU8String), nullopt, nullopt, nullopt);
     }
@@ -48,7 +48,8 @@ public:
     bool operator==(const Formatted& ) const;
     
     std::string toString() const;
-    
+    mbgl::Value toObject() const;
+
     bool empty() const {
         return sections.empty() || sections.at(0).text.empty();
     }
@@ -59,13 +60,18 @@ public:
 } // namespace expression
     
 namespace conversion {
-    
+
 template <>
-struct Converter<mbgl::style::expression::Formatted> {
+struct Converter<expression::Formatted> {
 public:
-    optional<mbgl::style::expression::Formatted> operator()(const Convertible& value, Error& error) const;
+    optional<expression::Formatted> operator()(const Convertible& value, Error& error) const;
 };
-    
+
+template <>
+struct ValueFactory<expression::Formatted> {
+    static Value make(const expression::Formatted& formatted) { return formatted.toObject(); }
+};
+
 } // namespace conversion
     
 } // namespace style

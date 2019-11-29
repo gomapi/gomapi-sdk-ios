@@ -296,7 +296,7 @@ public class SymbolLayerTest extends BaseLayerTest {
     assertEquals(layer.getIconImage().getValue(), propertyValue);
 
     layer.setProperties(iconImage("{token}"));
-    assertEquals(layer.getIconImage().getExpression(), Expression.toString(Expression.get("token")));
+    assertEquals(layer.getIconImage().getExpression(), image(Expression.toString(Expression.get("token"))));
   }
 
   @Test
@@ -307,7 +307,7 @@ public class SymbolLayerTest extends BaseLayerTest {
     assertNull(layer.getIconImage().getExpression());
 
     // Set and Get
-    Expression expression = string(Expression.get("undefined"));
+    Expression expression = image(string(Expression.get("undefined")));
     layer.setProperties(iconImage(expression));
     assertEquals(layer.getIconImage().getExpression(), expression);
   }
@@ -666,6 +666,19 @@ public class SymbolLayerTest extends BaseLayerTest {
     Float propertyValue = 0.3f;
     layer.setProperties(textMaxAngle(propertyValue));
     assertEquals(layer.getTextMaxAngle().getValue(), propertyValue);
+  }
+
+  @Test
+  @UiThreadTest
+  public void testTextWritingModeAsConstant() {
+    Timber.i("text-writing-mode");
+    assertNotNull(layer);
+    assertNull(layer.getTextWritingMode().getValue());
+
+    // Set and Get
+    String[] propertyValue = new String[0];
+    layer.setProperties(textWritingMode(propertyValue));
+    assertEquals(layer.getTextWritingMode().getValue(), propertyValue);
   }
 
   @Test

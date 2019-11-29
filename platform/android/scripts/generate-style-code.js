@@ -49,10 +49,19 @@ var layers = Object.keys(spec.layer.type.values).map((type) => {
 });
 
 // Process all layer properties
+const uniqueArrayEnum = (prop, enums) => {
+  if (prop.value !== 'enum') return false;
+  const enumsEqual = (val1, val2) => val1.length === val1.length && val1.every((val, i) => val === val2[i]);
+  return enums.filter(e => enumsEqual(Object.keys(prop.values).sort(), Object.keys(e.values).sort())).length == 0;
+};
+
 const layoutProperties = _(layers).map('layoutProperties').flatten().value();
 const paintProperties = _(layers).map('paintProperties').flatten().value();
 const allProperties = _(layoutProperties).union(paintProperties).union(lightProperties).value();
-const enumProperties = _(allProperties).filter({'type': 'enum'}).value();
+let allEnumProperties = _(allProperties).filter({'type': 'enum'}).value();
+const uniqueArrayEnumProperties = _(allProperties).filter({'type': 'array'}).filter(prop => uniqueArrayEnum(prop, allEnumProperties)).value();
+const enumProperties = _(allEnumProperties).union(uniqueArrayEnumProperties).value();
+
 
 global.propertyType = function propertyType(property) {
   switch (property.type) {
@@ -63,6 +72,7 @@ global.propertyType = function propertyType(property) {
       case 'formatted':
         return 'Formatted';
       case 'string':
+      case 'resolvedImage':
         return 'String';
       case 'enum':
         return 'String';
@@ -84,6 +94,7 @@ global.propertyJavaType = function propertyType(property) {
        case 'formatted':
          return 'Formatted';
        case 'string':
+       case 'resolvedImage':
          return 'String';
        case 'enum':
          return 'String';
@@ -132,6 +143,7 @@ global.propertyNativeType = function (property) {
     return 'float';
   case 'formatted':
   case 'string':
+  case 'resolvedImage': // TODO: replace once we implement image expressions
     return 'std::string';
   case 'enum':
     if(property['light-property']){
@@ -167,8 +179,9 @@ global.defaultExpressionJava = function(property) {
         return 'number';
       case 'formatted':
         return 'format';
+      case 'resolvedImage':
+        return "image";
       case 'string':
-        return "string";
       case 'enum':
         return "string";
       case 'color':
@@ -194,6 +207,7 @@ global.defaultValueJava = function(property) {
       case 'formatted':
         return 'new Formatted(new FormattedSection("default"))'
       case 'string':
+      case 'resolvedImage':
         return '"' + property['default'] + '"';
       case 'enum':
         return snakeCaseUpper(property.name) + "_" + snakeCaseUpper(Object.keys(property.values)[0]);
@@ -326,6 +340,7 @@ global.evaluatedType = function (property) {
     return 'float';
   case 'formatted':
   case 'string':
+  case 'image':
     return 'std::string';
   case 'enum':
     return (isLightProperty(property) ? 'Light' : '') + `${camelize(property.name)}Type`;

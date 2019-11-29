@@ -8,6 +8,9 @@ import com.mapbox.mapboxsdk.constants.MapboxConstants;
 import com.mapbox.mapboxsdk.geometry.LatLng;
 
 import org.junit.Test;
+import org.junit.runner.RunWith;
+import org.robolectric.RobolectricTestRunner;
+import org.robolectric.RuntimeEnvironment;
 
 import java.util.Arrays;
 
@@ -18,6 +21,7 @@ import static org.junit.Assert.assertNotEquals;
 import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertTrue;
 
+@RunWith(RobolectricTestRunner.class)
 public class MapboxMapOptionsTest {
 
   private static final double DELTA = 1e-15;
@@ -164,6 +168,16 @@ public class MapboxMapOptionsTest {
   }
 
   @Test
+  public void testPrefetchZoomDelta() {
+    // Default value
+    assertEquals(4, new MapboxMapOptions().getPrefetchZoomDelta());
+
+    // Check mutations
+    assertEquals(5, new MapboxMapOptions().setPrefetchZoomDelta(5).getPrefetchZoomDelta());
+  }
+
+
+  @Test
   public void testCrossSourceCollisions() {
     // Default value
     assertTrue(new MapboxMapOptions().getCrossSourceCollisions());
@@ -171,6 +185,12 @@ public class MapboxMapOptionsTest {
     // check mutations
     assertTrue(new MapboxMapOptions().crossSourceCollisions(true).getCrossSourceCollisions());
     assertFalse(new MapboxMapOptions().crossSourceCollisions(false).getCrossSourceCollisions());
+  }
+
+  @Test
+  public void testLocalIdeographFontFamily_enabledByDefault() {
+    MapboxMapOptions options = MapboxMapOptions.createFromAttributes(RuntimeEnvironment.application, null);
+    assertEquals(MapboxConstants.DEFAULT_FONT, options.getLocalIdeographFontFamily());
   }
 }
 

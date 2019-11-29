@@ -19,9 +19,14 @@ namespace mbgl {
 
 using namespace style;
 
+namespace {
+
 inline const HeatmapLayer::Impl& impl(const Immutable<Layer::Impl>& impl) {
+    assert(impl->getTypeInfo() == HeatmapLayer::Impl::staticTypeInfo());
     return static_cast<const HeatmapLayer::Impl&>(*impl);
 }
+
+} // namespace
 
 RenderHeatmapLayer::RenderHeatmapLayer(Immutable<HeatmapLayer::Impl> _impl)
     : RenderLayer(makeMutable<HeatmapLayerProperties>(std::move(_impl))),
@@ -214,13 +219,10 @@ void RenderHeatmapLayer::updateColorRamp() {
     }
 }
 
-bool RenderHeatmapLayer::queryIntersectsFeature(
-        const GeometryCoordinates& queryGeometry,
-        const GeometryTileFeature& feature,
-        const float zoom,
-        const TransformState&,
-        const float pixelsToTileUnits,
-        const mat4&) const {
+bool RenderHeatmapLayer::queryIntersectsFeature(const GeometryCoordinates& queryGeometry,
+                                                const GeometryTileFeature& feature, const float zoom,
+                                                const TransformState&, const float pixelsToTileUnits, const mat4&,
+                                                const FeatureState&) const {
     (void) queryGeometry;
     (void) feature;
     (void) zoom;

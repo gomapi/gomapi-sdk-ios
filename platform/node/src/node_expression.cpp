@@ -35,16 +35,15 @@ void NodeExpression::Init(v8::Local<v8::Object> target) {
 }
 
 type::Type parseType(v8::Local<v8::Object> type) {
-    static std::unordered_map<std::string, type::Type> types = {
-        {"string", type::String},
-        {"number", type::Number},
-        {"boolean", type::Boolean},
-        {"object", type::Object},
-        {"color", type::Color},
-        {"value", type::Value},
-        {"formatted", type::Formatted},
-        {"number-format", type::String}
-    };
+    static std::unordered_map<std::string, type::Type> types = {{"string", type::String},
+                                                                {"number", type::Number},
+                                                                {"boolean", type::Boolean},
+                                                                {"object", type::Object},
+                                                                {"color", type::Color},
+                                                                {"value", type::Value},
+                                                                {"formatted", type::Formatted},
+                                                                {"number-format", type::String},
+                                                                {"resolvedImage", type::Image}};
 
     v8::Local<v8::Value> v8kind = Nan::Get(type, Nan::New("kind").ToLocalChecked()).ToLocalChecked();
     std::string kind(*v8::String::Utf8Value(v8kind));
@@ -192,6 +191,11 @@ struct ToValue {
             } else {
                 serializedSection.emplace("fontStack", mbgl::NullValue());
             }
+            if (section.textColor) {
+                serializedSection.emplace("textColor", section.textColor->toObject());
+            } else {
+                serializedSection.emplace("textColor", mbgl::NullValue());
+            }
             sections.emplace_back(serializedSection);
         }
         serialized.emplace("sections", sections);
@@ -217,6 +221,8 @@ struct ToValue {
 
         return scope.Escape(result);
     }
+
+    v8::Local<v8::Value> operator()(const Image& image) { return toJS(image.toValue()); }
 };
 
 v8::Local<v8::Value> toJS(const Value& value) {

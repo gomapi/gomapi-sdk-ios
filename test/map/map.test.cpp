@@ -20,8 +20,10 @@
 #include <mbgl/style/style.hpp>
 #include <mbgl/style/image.hpp>
 #include <mbgl/style/layers/background_layer.hpp>
+#include <mbgl/style/layers/raster_layer.hpp>
 #include <mbgl/style/layers/symbol_layer.hpp>
 #include <mbgl/style/sources/geojson_source.hpp>
+#include <mbgl/style/sources/image_source.hpp>
 #include <mbgl/util/color.hpp>
 
 using namespace mbgl;
@@ -257,10 +259,7 @@ TEST(Map, Offline) {
 
     test.map.getStyle().loadURL(prefix + "style.json");
 
-    test::checkImage("test/fixtures/map/offline",
-                     test.frontend.render(test.map),
-                     0.0015,
-                     0.1);
+    test::checkImage("test/fixtures/map/offline", test.frontend.render(test.map).image, 0.0015, 0.1);
 
     NetworkStatus::Set(NetworkStatus::Status::Online);
 }
@@ -317,7 +316,7 @@ TEST(Map, DefaultBoundOptions) {
 
     EXPECT_EQ(*bounds.minZoom, util::MIN_ZOOM);
     EXPECT_EQ(*bounds.maxZoom, util::DEFAULT_MAX_ZOOM);
-    EXPECT_EQ(*bounds.bounds, LatLngBounds::unbounded());
+    EXPECT_EQ(*bounds.bounds, LatLngBounds());
 }
 
 TEST(Map, MapOptions) {
@@ -606,7 +605,7 @@ TEST(Map, AddLayer) {
     layer->setBackgroundColor({ { 1, 0, 0, 1 } });
     test.map.getStyle().addLayer(std::move(layer));
 
-    test::checkImage("test/fixtures/map/add_layer", test.frontend.render(test.map));
+    test::checkImage("test/fixtures/map/add_layer", test.frontend.render(test.map).image);
 }
 
 TEST(Map, WithoutVAOExtension) {
@@ -621,7 +620,7 @@ TEST(Map, WithoutVAOExtension) {
 
     test.map.getStyle().loadJSON(util::read_file("test/fixtures/api/water.json"));
 
-    test::checkImage("test/fixtures/map/no_vao", test.frontend.render(test.map), 0.002);
+    test::checkImage("test/fixtures/map/no_vao", test.frontend.render(test.map).image, 0.002);
 }
 
 TEST(Map, RemoveLayer) {
@@ -634,7 +633,7 @@ TEST(Map, RemoveLayer) {
     test.map.getStyle().addLayer(std::move(layer));
     test.map.getStyle().removeLayer("background");
 
-    test::checkImage("test/fixtures/map/remove_layer", test.frontend.render(test.map));
+    test::checkImage("test/fixtures/map/remove_layer", test.frontend.render(test.map).image);
 }
 
 TEST(Map, DisabledSources) {
@@ -692,9 +691,9 @@ TEST(Map, DisabledSources) {
 }
 )STYLE");
 
-    test::checkImage("test/fixtures/map/disabled_layers/first", test.frontend.render(test.map));
+    test::checkImage("test/fixtures/map/disabled_layers/first", test.frontend.render(test.map).image);
     test.map.jumpTo(CameraOptions().withZoom(0.5));
-    test::checkImage("test/fixtures/map/disabled_layers/second", test.frontend.render(test.map));
+    test::checkImage("test/fixtures/map/disabled_layers/second", test.frontend.render(test.map).image);
 }
 
 TEST(Map, DontLoadUnneededTiles) {
@@ -760,7 +759,7 @@ TEST(Map, TEST_DISABLED_ON_CI(ContinuousRendering)) {
     HeadlessFrontend frontend(1);
 
     StubMapObserver observer;
-    observer.didFinishRenderingFrameCallback = [&] (MapObserver::RenderMode) {
+    observer.didFinishRenderingFrameCallback = [&] (MapObserver::RenderFrameStatus) {
         // Start a timer that ends the test one second from now. If we are continuing to render
         // indefinitely, the timer will be constantly restarted and never trigger. Instead, the
         // emergency shutoff above will trigger, failing the test.
@@ -813,10 +812,7 @@ TEST(Map, NoContentTiles) {
       }]
     })STYLE");
 
-    test::checkImage("test/fixtures/map/nocontent",
-                     test.frontend.render(test.map),
-                     0.0015,
-                     0.1);
+    test::checkImage("test/fixtures/map/nocontent", test.frontend.render(test.map).image, 0.0015, 0.1);
 }
 
 // https://github.com/mapbox/mapbox-gl-native/issues/12432
@@ -866,4 +862,195 @@ TEST(Map, Issue12432) {
     };
 
     test.runLoop.run();
+}
+
+// https://github.com/mapbox/mapbox-gl-native/issues/15216
+TEST(Map, Issue15216) {
+    MapTest<> test { 1.0f,  MapMode::Continuous };
+    test.map.getStyle().addSource(std::make_unique<ImageSource>("ImageSource", std::array<LatLng, 4>()));
+    test.map.getStyle().addLayer(std::make_unique<RasterLayer>("RasterLayer", "ImageSource"));
+    // Passes, if there is no assertion hit.
+    test.runLoop.runOnce();
+}
+
+// https://github.com/mapbox/mapbox-gl-native/issues/15342
+// Tests the fix for constant repaint caused by `RenderSource::hasFadingTiles()` returning `true` all the time.
+TEST(Map, Issue15342) {
+    MapTest<> test { 1, MapMode::Continuous };
+
+    test.fileSource->tileResponse = [&](const Resource&) {
+        Response result;
+        result.data = std::make_shared<std::string>(util::read_file("test/fixtures/map/issue12432/0-0-0.mvt"));
+        return result;
+    };
+    test.map.jumpTo(CameraOptions().withZoom(3.0));
+    test.map.getStyle().loadJSON(R"STYLE({
+      "version": 8,
+      "sources": {
+        "mapbox": {
+          "type": "vector",
+          "tiles": ["http://example.com/{z}-{x}-{y}.vector.pbf"]
+        }
+      },
+      "layers": [{
+        "id": "water",
+        "type": "fill",
+        "source": "mapbox",
+        "source-layer": "water"
+      }]
+    })STYLE");
+
+    test.observer.didFinishLoadingMapCallback = [&]() {
+        test.map.getStyle().loadJSON(R"STYLE({
+          "version": 8,
+          "sources": {
+            "mapbox": {
+              "type": "vector",
+              "tiles": ["http://example.com/{z}-{x}-{y}.vector.pbf"]
+            }
+          },
+          "layers": []
+        })STYLE");
+        test.map.jumpTo(CameraOptions().withZoom(20.0));
+        test.observer.didFinishRenderingFrameCallback = [&] (MapObserver::RenderFrameStatus status) {
+            if (!status.needsRepaint) {
+                test.runLoop.stop();
+            }
+        };
+    };
+
+    test.runLoop.run();
+}
+
+TEST(Map, UniversalStyleGetter) {
+    MapTest<> test;
+
+    test.map.getStyle().loadJSON(R"STYLE({
+        "sources": {
+            "mapbox": {
+                "type": "vector",
+                "tiles": ["http://example.com/{z}-{x}-{y}.vector.pbf"]
+            }
+        },
+        "layers": [{
+            "id": "line",
+            "type": "line",
+            "source": "mapbox",
+            "paint": {
+                "line-color": "red",
+                "line-opacity": 0.5,
+                "line-width": ["get", "width"]
+            },
+            "layout": {
+                "line-cap": "butt"
+            }
+        }]
+        })STYLE");
+
+    Layer* lineLayer = test.map.getStyle().getLayer("line");
+    ASSERT_TRUE(lineLayer);
+
+    StyleProperty nonexistent = lineLayer->getProperty("nonexistent");
+    ASSERT_FALSE(nonexistent.getValue());
+    EXPECT_EQ(StyleProperty::Kind::Undefined, nonexistent.getKind());
+
+    StyleProperty undefined = lineLayer->getProperty("line-blur");
+    ASSERT_FALSE(undefined.getValue());
+    EXPECT_EQ(StyleProperty::Kind::Undefined, undefined.getKind());
+
+    StyleProperty lineColor = lineLayer->getProperty("line-color");
+    ASSERT_TRUE(lineColor.getValue());
+    EXPECT_EQ(StyleProperty::Kind::Constant, lineColor.getKind());
+    ASSERT_TRUE(lineColor.getValue().getObject());
+    const auto& color = *(lineColor.getValue().getObject());
+    EXPECT_EQ(1.0, *color.at("r").getDouble());
+    EXPECT_EQ(0.0, *color.at("g").getDouble());
+    EXPECT_EQ(0.0, *color.at("b").getDouble());
+    EXPECT_EQ(1.0, *color.at("a").getDouble());
+
+    StyleProperty lineOpacity = lineLayer->getProperty("line-opacity");
+    ASSERT_TRUE(lineOpacity.getValue());
+    EXPECT_EQ(StyleProperty::Kind::Constant, lineOpacity.getKind());
+    ASSERT_TRUE(lineOpacity.getValue().getDouble());
+    EXPECT_EQ(0.5, *lineOpacity.getValue().getDouble());
+
+    StyleProperty lineOpacityTransition = lineLayer->getProperty("line-opacity-transition");
+    ASSERT_TRUE(lineOpacityTransition.getValue());
+    EXPECT_EQ(StyleProperty::Kind::Transition, lineOpacityTransition.getKind());
+    ASSERT_TRUE(lineOpacityTransition.getValue().getArray());
+    EXPECT_EQ(3u, lineOpacityTransition.getValue().getArray()->size());
+
+    StyleProperty lineWidth = lineLayer->getProperty("line-width");
+    ASSERT_TRUE(lineWidth.getValue());
+    EXPECT_EQ(StyleProperty::Kind::Expression, lineWidth.getKind());
+    ASSERT_TRUE(lineWidth.getValue().getArray());
+
+    const auto& expression = *lineWidth.getValue().getArray();
+    EXPECT_EQ(2u, expression.size());
+    ASSERT_TRUE(expression[0].getString());
+    EXPECT_EQ("number", *expression[0].getString());
+    ASSERT_TRUE(expression[1].getArray());
+    const auto& operation = *expression[1].getArray();
+    EXPECT_EQ(2, operation.size());
+    ASSERT_TRUE(operation[0].getString());
+    EXPECT_EQ("get", *operation[0].getString());
+    ASSERT_TRUE(operation[1].getString());
+    EXPECT_EQ("width", *operation[1].getString());
+
+    StyleProperty lineCap = lineLayer->getProperty("line-cap");
+    ASSERT_TRUE(lineCap.getValue());
+    EXPECT_EQ(StyleProperty::Kind::Constant, lineCap.getKind());
+    ASSERT_TRUE(lineCap.getValue().getString());
+    EXPECT_EQ(std::string("butt"), *lineCap.getValue().getString());
+}
+
+TEST(Map, NoHangOnMissingImage) {
+    MapTest<> test;
+
+    test.fileSource->tileResponse = [&](const Resource&) {
+        Response result;
+        result.data = std::make_shared<std::string>(util::read_file("test/fixtures/map/issue12432/0-0-0.mvt"));
+        return result;
+    };
+
+    test.fileSource->spriteImageResponse = [&](const Resource&) {
+        Response result;
+        result.data = std::make_shared<std::string>(util::read_file("test/fixtures/resources/sprite.png"));
+        return result;
+    };
+
+    test.fileSource->spriteJSONResponse = [&](const Resource&) {
+        Response result;
+        result.data = std::make_shared<std::string>(util::read_file("test/fixtures/resources/sprite.json"));
+        return result;
+    };
+
+    const std::string style{R"STYLE({
+      "version": 8,
+      "sprite": "http://example.com/sprites/sprite",
+      "sources": {
+        "mapbox": {
+          "type": "vector",
+          "tiles": ["http://example.com/{z}-{x}-{y}.vector.pbf"]
+        }
+      },
+      "layers": [{
+            "id": "background",
+            "type": "background",
+            "paint": {"background-color": "white"}
+        },{
+            "id": "water",
+            "type": "fill",
+            "source": "mapbox",
+            "source-layer": "water",
+            "paint": {"fill-pattern": "missing"}
+      }]
+    })STYLE"};
+    test.map.getStyle().loadJSON(style);
+    test.frontend.render(test.map);
+
+    test.map.getStyle().loadJSON(style);
+    test.map.jumpTo(test.map.getStyle().getDefaultCamera());
+    // The test passes if the following call does not hang.
+    test.frontend.render(test.map);
 }

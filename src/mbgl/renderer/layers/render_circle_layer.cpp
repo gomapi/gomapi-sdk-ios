@@ -15,9 +15,14 @@ namespace mbgl {
 
 using namespace style;
 
+namespace {
+
 inline const style::CircleLayer::Impl& impl(const Immutable<style::Layer::Impl>& impl) {
+    assert(impl->getTypeInfo() == CircleLayer::Impl::staticTypeInfo());
     return static_cast<const style::CircleLayer::Impl&>(*impl);
 }
+
+} // namespace
 
 RenderCircleLayer::RenderCircleLayer(Immutable<style::CircleLayer::Impl> _impl)
     : RenderLayer(makeMutable<CircleLayerProperties>(std::move(_impl))),
@@ -136,13 +141,10 @@ GeometryCoordinates projectQueryGeometry(const GeometryCoordinates& queryGeometr
     return projectedGeometry;
 }
 
-bool RenderCircleLayer::queryIntersectsFeature(
-        const GeometryCoordinates& queryGeometry,
-        const GeometryTileFeature& feature,
-        const float zoom,
-        const TransformState& transformState,
-        const float pixelsToTileUnits,
-        const mat4& posMatrix) const {
+bool RenderCircleLayer::queryIntersectsFeature(const GeometryCoordinates& queryGeometry,
+                                               const GeometryTileFeature& feature, const float zoom,
+                                               const TransformState& transformState, const float pixelsToTileUnits,
+                                               const mat4& posMatrix, const FeatureState& featureState) const {
     const auto& evaluated = static_cast<const CircleLayerProperties&>(*evaluatedProperties).evaluated;
     // Translate query geometry
     const GeometryCoordinates& translatedQueryGeometry = FeatureIndex::translateQueryGeometry(
@@ -153,8 +155,8 @@ bool RenderCircleLayer::queryIntersectsFeature(
             pixelsToTileUnits).value_or(queryGeometry);
 
     // Evaluate functions
-    auto radius = evaluated.evaluate<style::CircleRadius>(zoom, feature);
-    auto stroke = evaluated.evaluate<style::CircleStrokeWidth>(zoom, feature);
+    auto radius = evaluated.evaluate<style::CircleRadius>(zoom, feature, featureState);
+    auto stroke = evaluated.evaluate<style::CircleStrokeWidth>(zoom, feature, featureState);
     auto size = radius + stroke;
 
     // For pitch-alignment: map, compare feature geometry to query geometry in the plane of the tile
@@ -167,7 +169,7 @@ bool RenderCircleLayer::queryIntersectsFeature(
         projectQueryGeometry(translatedQueryGeometry, posMatrix, transformState.getSize());
     auto transformedSize = alignWithMap ? size * pixelsToTileUnits : size;
 
-    auto geometry = feature.getGeometries();
+    const auto& geometry = feature.getGeometries();
     for (auto& ring : geometry) {
         for (auto& point : ring) {
             const GeometryCoordinate& transformedPoint = alignWithMap ? point : projectPoint(point, posMatrix, transformState.getSize());

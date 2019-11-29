@@ -32,7 +32,7 @@ const std::string& RenderLayer::getID() const {
 }
 
 bool RenderLayer::hasRenderPass(RenderPass pass) const {
-    return bool(passes & pass);
+    return passes & pass;
 }
 
 bool RenderLayer::needsRendering() const {
@@ -47,6 +47,7 @@ bool RenderLayer::supportsZoom(float zoom) const {
 
 void RenderLayer::prepare(const LayerPrepareParameters& params) {
     assert(params.source);
+    assert(params.source->isEnabled());
     renderTiles = params.source->getRenderTiles();
     addRenderPassesFromTiles();
 }

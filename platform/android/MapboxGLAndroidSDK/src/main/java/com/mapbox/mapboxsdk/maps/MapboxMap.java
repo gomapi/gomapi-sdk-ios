@@ -6,6 +6,7 @@ import android.graphics.PointF;
 import android.graphics.RectF;
 import android.os.Bundle;
 import android.support.annotation.FloatRange;
+import android.support.annotation.IntRange;
 import android.support.annotation.NonNull;
 import android.support.annotation.Nullable;
 import android.support.annotation.Size;
@@ -246,12 +247,16 @@ public final class MapboxMap {
   // Style
 
   /**
-   * Sets tile pre-fetching from MapboxOptions.
+   * Sets tile pre-fetching zoom delta from MapboxOptions.
    *
    * @param options the options object
    */
   private void setPrefetchesTiles(@NonNull MapboxMapOptions options) {
-    setPrefetchesTiles(options.getPrefetchesTiles());
+    if (!options.getPrefetchesTiles()) {
+      setPrefetchZoomDelta(0);
+    } else {
+      setPrefetchZoomDelta(options.getPrefetchZoomDelta());
+    }
   }
 
   /**
@@ -259,7 +264,9 @@ public final class MapboxMap {
    * tile is rendered as soon as possible at the expense of a little bandwidth.
    *
    * @param enable true to enable
+   * @deprecated Use {@link #setPrefetchZoomDelta(int)} instead.
    */
+  @Deprecated
   public void setPrefetchesTiles(boolean enable) {
     nativeMapView.setPrefetchTiles(enable);
   }
@@ -269,9 +276,36 @@ public final class MapboxMap {
    *
    * @return true if enabled
    * @see MapboxMap#setPrefetchesTiles(boolean)
+   * @deprecated Use {@link #getPrefetchZoomDelta()} instead.
    */
+  @Deprecated
   public boolean getPrefetchesTiles() {
     return nativeMapView.getPrefetchTiles();
+  }
+
+  /**
+   * Set the tile pre-fetching zoom delta. Pre-fetching makes sure that a low-resolution
+   * tile at the (current_zoom_level - delta) is rendered as soon as possible at the
+   * expense of a little bandwidth.
+   * Note: This operation will override the MapboxMapOptions#setPrefetchesTiles(boolean)
+   *       Setting zoom delta to 0 will disable pre-fetching.
+   * Default zoom delta is 4.
+   *
+   * @param delta zoom delta
+   */
+  public void setPrefetchZoomDelta(@IntRange(from = 0) int delta) {
+    nativeMapView.setPrefetchZoomDelta(delta);
+  }
+
+  /**
+   * Check current pre-fetching zoom delta.
+   *
+   * @return current zoom delta.
+   * @see MapboxMap#setPrefetchZoomDelta(int)
+   */
+  @IntRange(from = 0)
+  public int getPrefetchZoomDelta() {
+    return nativeMapView.getPrefetchZoomDelta();
   }
 
   //
@@ -837,7 +871,7 @@ public final class MapboxMap {
       nativeMapView.setStyleJson(builder.getJson());
     } else {
       // user didn't provide a `from` component, load a blank style instead
-      nativeMapView.setStyleJson("{}");
+      nativeMapView.setStyleJson(Style.EMPTY_JSON);
     }
   }
 
@@ -1540,24 +1574,38 @@ public final class MapboxMap {
    * frame from the viewport. For instance, if the only the top edge is inset, the
    * map center is effectively shifted downward.
    * </p>
+   * <p>
+   * This method sets the padding "lazily".
+   * This means that the <b>padding is going to be applied with the next camera transformation.</b>
+   * To apply the padding immediately use {@link CameraPosition.Builder#padding(double, double, double, double)}
+   * or {@link CameraUpdateFactory#paddingTo(double, double, double, double)}.
+   * </p>
    *
    * @param left   The left margin in pixels.
    * @param top    The top margin in pixels.
    * @param right  The right margin in pixels.
    * @param bottom The bottom margin in pixels.
+   * @deprecated Use {@link CameraPosition.Builder#padding(double, double, double, double)}
+   * or {@link CameraUpdateFactory#paddingTo(double, double, double, double)} instead.
    */
+  @Deprecated
   public void setPadding(int left, int top, int right, int bottom) {
+    // TODO padding should be passed as doubles
     projection.setContentPadding(new int[] {left, top, right, bottom});
     uiSettings.invalidate();
   }
 
   /**
-   * Returns the current configured content padding on map view.
+   * Returns the current configured content padding on map view. This might return the currently visible padding
+   * or the padding cached but not yet applied by {@link #setPadding(int, int, int, int)}.
    *
    * @return An array with length 4 in the LTRB order.
+   * @deprecated Use {@link CameraPosition#padding} instead.
    */
+  @Deprecated
   @NonNull
   public int[] getPadding() {
+    // TODO this should return double[] (semver major change)
     return projection.getContentPadding();
   }
 

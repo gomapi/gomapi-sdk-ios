@@ -92,6 +92,14 @@ static std::vector<std::string> databaseTableColumns(const std::string& path, co
     return columns;
 }
 
+static int databaseAutoVacuum(const std::string& path) {
+    mapbox::sqlite::Database db = mapbox::sqlite::Database::open(path, mapbox::sqlite::ReadOnly);
+    mapbox::sqlite::Statement stmt{db, "pragma auto_vacuum"};
+    mapbox::sqlite::Query query{stmt};
+    query.run();
+    return query.get<int>(0);
+}
+
 namespace fixture {
 
 const Resource resource{ Resource::Style, "mapbox://test" };
@@ -515,7 +523,8 @@ TEST(OfflineDatabase, GetRegionDefinition) {
     );
 }
 
-TEST(OfflineDatabase, TEST_REQUIRES_WRITE(MaximumAmbientCacheSize)) {
+// Disabled due to flakiness: https://github.com/mapbox/mapbox-gl-native/issues/14966
+TEST(OfflineDatabase, TEST_REQUIRES_WRITE(DISABLED_MaximumAmbientCacheSize)) {
     FixtureLog log;
     deleteDatabaseFiles();
 
@@ -649,6 +658,22 @@ TEST(OfflineDatabase, TEST_REQUIRES_WRITE(MaximumAmbientCacheSize)) {
     EXPECT_EQ(initialSize, util::read_file(filename).size());
 }
 
+namespace {
+std::list<std::tuple<Resource, Response>> generateResources(const std::string& tilePrefix,
+                                                            const std::string& stylePrefix) {
+    static const auto responseData = randomString(.5 * 1024 * 1024);
+    Response response;
+    response.data = responseData;
+    std::list<std::tuple<Resource, Response>> resources;
+    for (unsigned i = 0; i < 50; ++i) {
+        resources.emplace_back(Resource::tile(tilePrefix + std::to_string(i), 1, 0, 0, 0, Tileset::Scheme::XYZ),
+                               response);
+        resources.emplace_back(Resource::style(stylePrefix + std::to_string(i)), response);
+    }
+    return resources;
+}
+} // namespace
+
 TEST(OfflineDatabase, TEST_REQUIRES_WRITE(DeleteRegion)) {
     FixtureLog log;
     deleteDatabaseFiles();
@@ -668,25 +693,35 @@ TEST(OfflineDatabase, TEST_REQUIRES_WRITE(DeleteRegion)) {
         OfflineTilePyramidRegionDefinition definition{ "mapbox://style", LatLngBounds::hull({1, 2}, {3, 4}), 5, 6, 2.0, true };
         OfflineRegionMetadata metadata{{ 1, 2, 3 }};
 
-        auto region = db.createRegion(definition, metadata);
+        auto region1 = db.createRegion(definition, metadata);
+        auto region2 = db.createRegion(definition, metadata);
 
-        for (unsigned i = 0; i < 50; ++i) {
-            const Resource tile = Resource::tile("mapbox://tile_" + std::to_string(i), 1, 0, 0, 0, Tileset::Scheme::XYZ);
-            db.putRegionResource(region->getID(), tile, response);
+        OfflineRegionStatus status;
+        db.putRegionResources(region1->getID(), generateResources("mapbox://tile_1", "mapbox://style_1"), status);
+        db.putRegionResources(region2->getID(), generateResources("mapbox://tile_2", "mapbox://style_2"), status);
+        const size_t sizeWithTwoRegions = util::read_file(filename).size();
 
-            const Resource style = Resource::style("mapbox://style_" + std::to_string(i));
-            db.putRegionResource(region->getID(), style, response);
-        }
+        db.deleteRegion(std::move(*region1), false /*pack*/);
 
-        db.deleteRegion(std::move(*region));
+        ASSERT_EQ(1u, db.listRegions().value().size());
+        // Region is removed but the size of the database is the same.
+        EXPECT_EQ(sizeWithTwoRegions, util::read_file(filename).size());
 
-        auto regions = db.listRegions().value();
-        ASSERT_EQ(0u, regions.size());
+        db.pack();
+        // The size of the database has shrunk after pack().
+        const size_t sizeWithOneRegion = util::read_file(filename).size();
+        EXPECT_LT(sizeWithOneRegion, sizeWithTwoRegions);
+
+        db.deleteRegion(std::move(*region2));
+        // The size of the database has shrunk right away.
+        const size_t sizeWithoutRegions = util::read_file(filename).size();
+        ASSERT_EQ(0u, db.listRegions().value().size());
+        EXPECT_LT(sizeWithoutRegions, sizeWithOneRegion);
 
         // The tiles from the offline region will migrate to the
         // ambient cache and shrink the database to the maximum
         // size defined by default.
-        EXPECT_LE(util::read_file(filename).size(), util::DEFAULT_MAX_CACHE_SIZE);
+        EXPECT_LE(sizeWithoutRegions, util::DEFAULT_MAX_CACHE_SIZE);
 
         // After clearing the cache, the size of the database
         // should get back to the original size.
@@ -1092,8 +1127,8 @@ TEST(OfflineDatabase, HasRegionResource) {
     auto region = db.createRegion(definition, OfflineRegionMetadata());
     ASSERT_TRUE(region);
 
-    EXPECT_FALSE(bool(db.hasRegionResource(region->getID(), Resource::style("http://example.com/1"))));
-    EXPECT_FALSE(bool(db.hasRegionResource(region->getID(), Resource::style("http://example.com/20"))));
+    EXPECT_FALSE(bool(db.hasRegionResource(Resource::style("http://example.com/1"))));
+    EXPECT_FALSE(bool(db.hasRegionResource(Resource::style("http://example.com/20"))));
 
     Response response;
     response.data = randomString(1024);
@@ -1102,9 +1137,9 @@ TEST(OfflineDatabase, HasRegionResource) {
         db.putRegionResource(region->getID(), Resource::style("http://example.com/"s + util::toString(i)), response);
     }
 
-    EXPECT_TRUE(bool(db.hasRegionResource(region->getID(), Resource::style("http://example.com/1"))));
-    EXPECT_TRUE(bool(db.hasRegionResource(region->getID(), Resource::style("http://example.com/20"))));
-    EXPECT_EQ(1024, *(db.hasRegionResource(region->getID(), Resource::style("http://example.com/20"))));
+    EXPECT_TRUE(bool(db.hasRegionResource(Resource::style("http://example.com/1"))));
+    EXPECT_TRUE(bool(db.hasRegionResource(Resource::style("http://example.com/20"))));
+    EXPECT_EQ(1024, *(db.hasRegionResource(Resource::style("http://example.com/20"))));
 
     EXPECT_EQ(0u, log.uncheckedCount());
 }
@@ -1130,16 +1165,16 @@ TEST(OfflineDatabase, HasRegionResourceTile) {
 
     response.data = std::make_shared<std::string>("first");
 
-    EXPECT_FALSE(bool(db.hasRegionResource(region->getID(), resource)));
+    EXPECT_FALSE(bool(db.hasRegionResource(resource)));
     db.putRegionResource(region->getID(), resource, response);
-    EXPECT_TRUE(bool(db.hasRegionResource(region->getID(), resource)));
-    EXPECT_EQ(5, *(db.hasRegionResource(region->getID(), resource)));
+    EXPECT_TRUE(bool(db.hasRegionResource(resource)));
+    EXPECT_EQ(5, *(db.hasRegionResource(resource)));
 
     auto anotherRegion = db.createRegion(definition, OfflineRegionMetadata());
     ASSERT_TRUE(anotherRegion);
     EXPECT_LT(region->getID(), anotherRegion->getID());
-    EXPECT_TRUE(bool(db.hasRegionResource(anotherRegion->getID(), resource)));
-    EXPECT_EQ(5, *(db.hasRegionResource(anotherRegion->getID(), resource)));
+    EXPECT_TRUE(bool(db.hasRegionResource(resource)));
+    EXPECT_EQ(5, *(db.hasRegionResource(resource)));
 
     EXPECT_EQ(0u, log.uncheckedCount());
 
@@ -1359,13 +1394,45 @@ TEST(OfflineDatabase, MigrateFromV5Schema) {
 
     EXPECT_EQ(6, databaseUserVersion(filename));
 
-    EXPECT_EQ((std::vector<std::string>{ "id", "url_template", "pixel_ratio", "z", "x", "y",
-                                         "expires", "modified", "etag", "data", "compressed",
-                                         "accessed", "must_revalidate" }),
+    EXPECT_EQ((std::vector<std::string>{"id",
+                                        "url_template",
+                                        "pixel_ratio",
+                                        "z",
+                                        "x",
+                                        "y",
+                                        "expires",
+                                        "modified",
+                                        "etag",
+                                        "data",
+                                        "compressed",
+                                        "accessed",
+                                        "must_revalidate"}),
               databaseTableColumns(filename, "tiles"));
-    EXPECT_EQ((std::vector<std::string>{ "id", "url", "kind", "expires", "modified", "etag", "data",
-                                         "compressed", "accessed", "must_revalidate" }),
-              databaseTableColumns(filename, "resources"));
+    EXPECT_EQ(
+        (std::vector<std::string>{
+            "id", "url", "kind", "expires", "modified", "etag", "data", "compressed", "accessed", "must_revalidate"}),
+        databaseTableColumns(filename, "resources"));
+
+    EXPECT_EQ(0u, log.uncheckedCount());
+}
+
+TEST(OfflineDatabase, IncrementalVacuum) {
+    FixtureLog log;
+    deleteDatabaseFiles();
+    util::copyFile(filename, "test/fixtures/offline_database/no_auto_vacuum.db");
+    EXPECT_EQ(0, databaseAutoVacuum(filename));
+
+    {
+        OfflineDatabase db(filename);
+        db.setMaximumAmbientCacheSize(0);
+
+        auto regions = db.listRegions().value();
+        for (auto& region : regions) {
+            db.deleteRegion(std::move(region));
+        }
+    }
+
+    EXPECT_EQ(2, databaseAutoVacuum(filename));
 
     EXPECT_EQ(0u, log.uncheckedCount());
 }
@@ -1487,12 +1554,12 @@ TEST(OfflineDatabase, TEST_REQUIRES_WRITE(DisallowedIO)) {
     EXPECT_EQ(1u, log.count(warning(ResultCode::Auth, "Can't update region metadata: authorization denied")));
     EXPECT_EQ(0u, log.uncheckedCount());
 
-    EXPECT_EQ(nullopt, db.getRegionResource(region->getID(), fixture::resource));
+    EXPECT_EQ(nullopt, db.getRegionResource(fixture::resource));
     EXPECT_EQ(1u, log.count(warning(ResultCode::Auth, "Can't update timestamp: authorization denied")));
     EXPECT_EQ(1u, log.count(warning(ResultCode::Auth, "Can't read region resource: authorization denied")));
     EXPECT_EQ(0u, log.uncheckedCount());
 
-    EXPECT_EQ(nullopt, db.hasRegionResource(region->getID(), fixture::resource));
+    EXPECT_EQ(nullopt, db.hasRegionResource(fixture::resource));
     EXPECT_EQ(1u, log.count(warning(ResultCode::Auth, "Can't query region resource: authorization denied")));
     EXPECT_EQ(0u, log.uncheckedCount());
 
@@ -1565,7 +1632,7 @@ TEST(OfflineDatabase, TEST_REQUIRES_WRITE(MergeDatabaseWithSingleRegion_Update))
         EXPECT_EQ(1u, status->completedTileCount);
 
         //Verify the modified timestamp matches the tile in the sideloaded db.
-        auto updatedTile = db.getRegionResource(regionId,
+        auto updatedTile = db.getRegionResource(
             Resource::tile("mapbox://tiles/mapbox.satellite/{z}/{x}/{y}{ratio}.webp",
                 1, 0, 0, 1, Tileset::Scheme::XYZ));
         EXPECT_EQ(Timestamp{ Seconds(1520409600) }, *(updatedTile->first.modified));
@@ -1585,8 +1652,7 @@ TEST(OfflineDatabase, MergeDatabaseWithSingleRegion_NoUpdate) {
     EXPECT_EQ(1u, result->size());
     EXPECT_EQ(1u, db.listRegions()->size());
 
-    auto regionId = result->front().getID();
-    auto updatedTile = db.getRegionResource(regionId,
+    auto updatedTile = db.getRegionResource(
         Resource::tile("mapbox://tiles/mapbox.satellite/{z}/{x}/{y}{ratio}.webp",
             1, 0, 0, 1, Tileset::Scheme::XYZ));
 
@@ -1600,14 +1666,13 @@ TEST(OfflineDatabase, MergeDatabaseWithSingleRegion_AmbientTiles) {
 
     OfflineDatabase db(":memory:");
     auto result = db.mergeDatabase(filename_sideload);
-    auto regionId = result->front().getID();
 
-    EXPECT_TRUE(bool(db.hasRegionResource(regionId, Resource::tile("mapbox://tiles/mapbox.satellite/{z}/{x}/{y}{ratio}.png", 1, 0, 0, 1, Tileset::Scheme::XYZ))));
+    EXPECT_TRUE(bool(db.hasRegionResource(Resource::tile("mapbox://tiles/mapbox.satellite/{z}/{x}/{y}{ratio}.png", 1, 0, 0, 1, Tileset::Scheme::XYZ))));
 
     //Ambient resources should not be copied
-    EXPECT_FALSE(bool(db.hasRegionResource(regionId, Resource::style("mapbox://styles/mapbox/streets-v9"))));
-    EXPECT_FALSE(bool(db.hasRegionResource(regionId, Resource::tile("mapbox://tiles/mapbox.satellite/{z}/{x}/{y}{ratio}.png", 1, 0, 1, 2, Tileset::Scheme::XYZ))));
-    EXPECT_FALSE(bool(db.hasRegionResource(regionId, Resource::tile("mapbox://tiles/mapbox.satellite/{z}/{x}/{y}{ratio}.png", 1, 1, 1, 2, Tileset::Scheme::XYZ))));
+    EXPECT_FALSE(bool(db.hasRegionResource(Resource::style("mapbox://styles/mapbox/streets-v9"))));
+    EXPECT_FALSE(bool(db.hasRegionResource(Resource::tile("mapbox://tiles/mapbox.satellite/{z}/{x}/{y}{ratio}.png", 1, 0, 1, 2, Tileset::Scheme::XYZ))));
+    EXPECT_FALSE(bool(db.hasRegionResource(Resource::tile("mapbox://tiles/mapbox.satellite/{z}/{x}/{y}{ratio}.png", 1, 1, 1, 2, Tileset::Scheme::XYZ))));
 }
 
 TEST(OfflineDatabase, MergeDatabaseWithMultipleRegions_New) {

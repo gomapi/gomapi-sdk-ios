@@ -1,3 +1,5 @@
+// clang-format off
+
 // This file is generated. Do not edit.
 
 #pragma once
@@ -21,6 +23,8 @@ public:
     // Dynamic properties
     optional<conversion::Error> setLayoutProperty(const std::string& name, const conversion::Convertible& value) final;
     optional<conversion::Error> setPaintProperty(const std::string& name, const conversion::Convertible& value) final;
+
+    StyleProperty getProperty(const std::string& name) const final;
 
     // Paint properties
 
@@ -48,9 +52,9 @@ public:
     void setFillExtrusionOpacityTransition(const TransitionOptions&);
     TransitionOptions getFillExtrusionOpacityTransition() const;
 
-    static PropertyValue<std::string> getDefaultFillExtrusionPattern();
-    const PropertyValue<std::string>& getFillExtrusionPattern() const;
-    void setFillExtrusionPattern(const PropertyValue<std::string>&);
+    static PropertyValue<expression::Image> getDefaultFillExtrusionPattern();
+    const PropertyValue<expression::Image>& getFillExtrusionPattern() const;
+    void setFillExtrusionPattern(const PropertyValue<expression::Image>&);
     void setFillExtrusionPatternTransition(const TransitionOptions&);
     TransitionOptions getFillExtrusionPatternTransition() const;
 
@@ -87,3 +91,5 @@ protected:
 
 } // namespace style
 } // namespace mbgl
+
+// clang-format on

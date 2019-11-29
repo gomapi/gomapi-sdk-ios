@@ -1,3 +1,5 @@
+// clang-format off
+
 // This file is generated. Do not edit.
 
 #pragma once
@@ -24,6 +26,8 @@ public:
     // Dynamic properties
     optional<conversion::Error> setLayoutProperty(const std::string& name, const conversion::Convertible& value) final;
     optional<conversion::Error> setPaintProperty(const std::string& name, const conversion::Convertible& value) final;
+
+    StyleProperty getProperty(const std::string& name) const final;
 
     // Layout properties
 
@@ -87,9 +91,9 @@ public:
     void setLineOpacityTransition(const TransitionOptions&);
     TransitionOptions getLineOpacityTransition() const;
 
-    static PropertyValue<std::string> getDefaultLinePattern();
-    const PropertyValue<std::string>& getLinePattern() const;
-    void setLinePattern(const PropertyValue<std::string>&);
+    static PropertyValue<expression::Image> getDefaultLinePattern();
+    const PropertyValue<expression::Image>& getLinePattern() const;
+    void setLinePattern(const PropertyValue<expression::Image>&);
     void setLinePatternTransition(const TransitionOptions&);
     TransitionOptions getLinePatternTransition() const;
 
@@ -126,3 +130,5 @@ protected:
 
 } // namespace style
 } // namespace mbgl
+
+// clang-format on

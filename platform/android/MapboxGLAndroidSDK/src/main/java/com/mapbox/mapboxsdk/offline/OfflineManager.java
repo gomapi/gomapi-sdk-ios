@@ -307,7 +307,48 @@ public class OfflineManager {
   }
 
   /**
-   * Forces revalidation of the ambient cache.
+   * Packs the existing database file into a minimal amount of disk space.
+   * <p>
+   * When the operation is complete or encounters an error, the given callback will be
+   * executed on the database thread; it is the responsibility of the SDK bindings
+   * to re-execute a user-provided callback on the main thread.
+   * </p>
+   *
+   * @param callback the callback to be invoked when the database was reset or when the operation erred.
+   */
+  public void packDatabase(@Nullable final FileSourceCallback callback) {
+    fileSource.activate();
+    nativePackDatabase(new FileSourceCallback() {
+      @Override
+      public void onSuccess() {
+        handler.post(new Runnable() {
+          @Override
+          public void run() {
+            fileSource.deactivate();
+            if (callback != null) {
+              callback.onSuccess();
+            }
+          }
+        });
+      }
+
+      @Override
+      public void onError(@NonNull final String message) {
+        handler.post(new Runnable() {
+          @Override
+          public void run() {
+            fileSource.deactivate();
+            if (callback != null) {
+              callback.onError(message);
+            }
+          }
+        });
+      }
+    });
+  }
+
+  /**
+   * Forces re-validation of the ambient cache.
    * <p>
    * Forces Mapbox GL Native to revalidate resources stored in the ambient
    * cache with the tile server before using them, making sure they
@@ -537,7 +578,13 @@ public class OfflineManager {
   }
 
   /**
-   * Create an offline region in the database.
+   * Creates an offline region in the database by downloading the resources needed to use
+   * the given region offline.
+   * <p>
+   * As of version 8.3.0 of the Maps SDK for Android, offline tile requests are no longer exempt from
+   * billing on mobile. Developers are subject to separate Vector Tile or Raster Tile API pricing for
+   * offline use. See <a href="https://www.mapbox.com/pricing/">our pricing page</a> for more information.
+   * </p>
    * <p>
    * When the initial database queries have completed, the provided callback will be
    * executed on the main thread.
@@ -609,10 +656,15 @@ public class OfflineManager {
   }
 
   /**
-   * Changing or bypassing this limit without permission from Mapbox is prohibited
-   * by the Mapbox Terms of Service.
+   * Sets the maximum number of Mapbox-hosted tiles that may be downloaded and stored on the current device.
+   * By default, the limit is set to 6,000.
+   * <p>
+   * Once this limit is reached, {@link OfflineRegion.OfflineRegionObserver#mapboxTileCountLimitExceeded(long)}
+   * fires every additional attempt to download additional tiles until already downloaded tiles are removed
+   * by calling {@link OfflineRegion#deleteOfflineRegion(OfflineRegion.OfflineRegionDeleteCallback)}.
+   * </p>
    *
-   * @param limit the new tile count limit.
+   * @param limit the maximum number of tiles allowed to be downloaded
    */
   @Keep
   public native void setOfflineMapboxTileCountLimit(long limit);
@@ -636,6 +688,9 @@ public class OfflineManager {
 
   @Keep
   private native void nativeResetDatabase(@Nullable FileSourceCallback callback);
+
+  @Keep
+  private native void nativePackDatabase(@Nullable FileSourceCallback callback);
 
   @Keep
   private native void nativeInvalidateAmbientCache(@Nullable FileSourceCallback callback);
